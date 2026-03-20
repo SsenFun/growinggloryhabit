@@ -340,13 +340,13 @@ body{background:var(--bg);font-family:var(--font-body);color:var(--text-1);min-h
    아래 YOUR_… 값을 Firebase 콘솔에서 복사한 값으로 교체하세요
    ════════════════════════════════════════════════════════ */
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCsSiPVsHyqN9Uxy4DzgOfYBQOTbB6QQZ0",
-  authDomain: "habitroom-d6829.firebaseapp.com",
-  databaseURL: "https://habitroom-d6829-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "habitroom-d6829",
-  storageBucket: "habitroom-d6829.firebasestorage.app",
-  messagingSenderId: "698596293908",
-  appId: "1:698596293908:web:7b6453e6726f92a2af9601"
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  databaseURL:       "YOUR_DATABASE_URL",   // https://xxx-default-rtdb.firebaseio.com
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
 };
 /* ════════════════════════════════════════════════════════ */
 
@@ -403,39 +403,49 @@ function showSetupFirebase() {
 }
 
 function startRealtimeSync() {
-  // Listen for all data changes in real-time
   dbRef.on('value', snapshot => {
     const data = snapshot.val() || {};
-    members  = data.members  || getDefaultMembers();
-    checks   = data.checks   || {};
-    notices  = data.notices  || getDefaultNotices();
-    nextMId  = data.nextMId  || 100;
-    nextHId  = data.nextHId  || 100;
-    nextNId  = data.nextNId  || 10;
+    members = data.members || getDefaultMembers();
+    checks  = data.checks  || {};
+    notices = data.notices || getDefaultNotices();
+    nextMId = data.nextMId || 100;
+    nextHId = data.nextHId || 100;
+    nextNId = data.nextNId || 10;
 
-    // Rebuild maps
-    if (!statMember && members.length) statMember = members[0].id;
-
-    const syncDot = document.getElementById('sync-dot');
-    if (syncDot) { syncDot.className='sync-dot live'; }
-
+    // ★ 핵심: 매번 localStorage에서 내 ID를 복원 (Firebase 업데이트마다 초기화 방지)
     const savedId = localStorage.getItem('gg_user_id');
     if (savedId) {
-      const found = members.find(m=>String(m.id)===String(savedId));
-      if (found) {
-        currentUserId = found.id;
-        enterApp();
-        render();
-        return;
-      }
+      const found = members.find(m => String(m.id) === String(savedId));
+      if (found) currentUserId = found.id;
     }
 
-    // Not picked yet — show pick screen
+    if (!statMember) statMember = currentUserId || (members[0] && members[0].id);
+
+    const syncDot = document.getElementById('sync-dot');
+    if (syncDot) syncDot.className = 'sync-dot live';
+
+    // 앱이 이미 열려 있으면 → 그냥 화면만 갱신 (enterApp 재호출 X)
+    const appEl = document.getElementById('app');
+    const appVisible = appEl && appEl.style.display !== 'none';
+
+    if (currentUserId && appVisible) {
+      updateChipUI();
+      render();
+      return;
+    }
+
+    // 앱이 아직 안 열렸지만 내 ID 확인됨 → 앱 진입
+    if (currentUserId) {
+      enterApp();
+      return;
+    }
+
+    // 사용자 미선택 → 이름 선택 화면
     hide('loading-screen');
     hide('app');
     show('setup-screen');
-    document.getElementById('step-firebase').style.display='none';
-    document.getElementById('step-pick').style.display='block';
+    document.getElementById('step-firebase').style.display = 'none';
+    document.getElementById('step-pick').style.display = 'block';
     renderMemberPick();
   });
 }
