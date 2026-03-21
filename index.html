@@ -54,10 +54,18 @@ body{background:var(--bg);font-family:var(--font-body);color:var(--text-1);min-h
 .member-pick-item.selected .member-pick-check{opacity:1;}
 
 /* ── LOADING ── */
-#loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;}
-.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;}
+#loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:24px;}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-txt{font-size:13px;color:var(--text-3);font-family:var(--font-display);letter-spacing:.1em;text-transform:uppercase;}
+#conn-error{display:none;background:var(--bg-card);border:1px solid rgba(220,80,80,.35);border-radius:var(--radius);padding:24px;max-width:380px;width:100%;text-align:center;animation:fadeUp .3s ease;}
+#conn-error .err-icon{font-size:32px;margin-bottom:10px;}
+#conn-error .err-title{font-family:var(--font-display);font-weight:800;font-size:14px;color:var(--white);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
+#conn-error .err-body{font-size:12px;color:var(--text-3);line-height:1.9;margin-bottom:16px;}
+#conn-error .err-body b{color:var(--gold-lt);font-weight:600;}
+#conn-error .err-retry{width:100%;background:linear-gradient(135deg,var(--gold-dk),var(--gold));border:none;border-radius:8px;padding:11px;font-size:12px;font-weight:700;font-family:var(--font-display);color:var(--white);cursor:pointer;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;transition:all .15s;}
+#conn-error .err-retry:hover{background:linear-gradient(135deg,var(--gold),var(--gold-lt));}
+#conn-error .err-checklist{text-align:left;background:var(--bg);border-radius:8px;padding:12px 14px;font-size:11px;color:var(--text-2);line-height:2.2;}
 
 /* ── CONFIG BANNER ── */
 #config-banner{
@@ -247,7 +255,23 @@ body{background:var(--bg);font-family:var(--font-body);color:var(--text-1);min-h
 <!-- ① LOADING -->
 <div id="loading-screen">
   <div class="spinner"></div>
-  <div class="loading-txt">연결 중...</div>
+  <div class="loading-txt" id="loading-txt">연결 중...</div>
+  <div id="conn-error">
+    <div class="err-icon">⚠️</div>
+    <div class="err-title">연결 실패</div>
+    <div class="err-body">
+      Firebase에 연결하지 못했어요.<br>
+      아래 항목을 확인해주세요.
+    </div>
+    <div class="err-checklist">
+      ✅ &nbsp;<b>databaseURL</b> 값이 정확한지 확인<br>
+      ✅ &nbsp;Firebase 규칙: <b>read/write = true</b><br>
+      ✅ &nbsp;Firebase 콘솔에서 <b>앱(Web) 등록</b> 여부<br>
+      ✅ &nbsp;인터넷 연결 상태 확인
+    </div>
+    <br>
+    <button class="err-retry" onclick="location.reload()">🔄 &nbsp;다시 시도</button>
+  </div>
 </div>
 
 <!-- ② SETUP (Firebase 미설정 or 첫 접속) -->
@@ -340,7 +364,7 @@ body{background:var(--bg);font-family:var(--font-body);color:var(--text-1);min-h
    아래 YOUR_… 값을 Firebase 콘솔에서 복사한 값으로 교체하세요
    ════════════════════════════════════════════════════════ */
 const FIREBASE_CONFIG = {
-   apiKey: "AIzaSyCsSiPVsHyqN9Uxy4DzgOfYBQOTbB6QQZ0",
+  apiKey: "AIzaSyCsSiPVsHyqN9Uxy4DzgOfYBQOTbB6QQZ0",
   authDomain: "habitroom-d6829.firebaseapp.com",
   databaseURL: "https://habitroom-d6829-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "habitroom-d6829",
@@ -380,10 +404,19 @@ window.addEventListener('load', ()=>{
     dbRef = db.ref('growinggloryrm');
     startRealtimeSync();
   } catch(e) {
-    console.error(e);
-    showSetupFirebase();
+    console.error('Firebase init error:', e);
+    showConnError();
   }
 });
+
+function showConnError() {
+  const spinner = document.querySelector('.spinner');
+  const txt = document.getElementById('loading-txt');
+  const errBox = document.getElementById('conn-error');
+  if (spinner) spinner.style.display = 'none';
+  if (txt) txt.style.display = 'none';
+  if (errBox) errBox.style.display = 'block';
+}
 
 function showSetupFirebase() {
   hide('loading-screen');
@@ -403,7 +436,28 @@ function showSetupFirebase() {
 }
 
 function startRealtimeSync() {
+  // 8초 안에 첫 응답 없으면 연결 실패 화면 표시
+  let firstResponseReceived = false;
+  const connTimeout = setTimeout(() => {
+    if (!firstResponseReceived) {
+      console.warn('Firebase connection timeout');
+      showConnError();
+    }
+  }, 8000);
+
+  // 연결 상태 실시간 감지
+  firebase.database().ref('.info/connected').on('value', snap => {
+    const syncDot = document.getElementById('sync-dot');
+    if (snap.val() === true) {
+      if (syncDot) syncDot.className = 'sync-dot live';
+    } else {
+      if (syncDot) syncDot.className = 'sync-dot';
+    }
+  });
+
   dbRef.on('value', snapshot => {
+    firstResponseReceived = true;
+    clearTimeout(connTimeout);
     const data = snapshot.val() || {};
     members = data.members || getDefaultMembers();
     checks  = data.checks  || {};
@@ -420,9 +474,6 @@ function startRealtimeSync() {
     }
 
     if (!statMember) statMember = currentUserId || (members[0] && members[0].id);
-
-    const syncDot = document.getElementById('sync-dot');
-    if (syncDot) syncDot.className = 'sync-dot live';
 
     // 앱이 이미 열려 있으면 → 그냥 화면만 갱신 (enterApp 재호출 X)
     const appEl = document.getElementById('app');
