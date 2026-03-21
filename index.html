@@ -435,6 +435,14 @@ function showSetupFirebase() {
 };`;
 }
 
+// Firebase는 배열을 {0:…, 1:…} 객체로 저장 → 진짜 배열로 변환
+function toArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(x => x != null);
+  if (typeof val === 'object') return Object.values(val).filter(x => x != null);
+  return [];
+}
+
 function startRealtimeSync() {
   // 8초 안에 첫 응답 없으면 연결 실패 화면 표시
   let firstResponseReceived = false;
@@ -459,9 +467,18 @@ function startRealtimeSync() {
     firstResponseReceived = true;
     clearTimeout(connTimeout);
     const data = snapshot.val() || {};
-    members = data.members || getDefaultMembers();
-    checks  = data.checks  || {};
-    notices = data.notices || getDefaultNotices();
+
+    // Firebase는 배열을 객체로 저장함 → 반드시 배열로 변환
+    const rawMembers = toArray(data.members);
+    members = rawMembers.length ? rawMembers.map(m => ({
+      ...m,
+      habits: toArray(m.habits)
+    })) : getDefaultMembers();
+    // checks에서 null/undefined 제거
+    const rawChecks = data.checks || {};
+    checks = {};
+    Object.keys(rawChecks).forEach(k => { if (rawChecks[k] === true) checks[k] = true; });
+    notices = toArray(data.notices).length ? toArray(data.notices) : getDefaultNotices();
     nextMId = data.nextMId || 100;
     nextHId = data.nextHId || 100;
     nextNId = data.nextNId || 10;
@@ -562,6 +579,22 @@ function joinAsNew() {
   });
 }
 
+function resetFirebaseData() {
+  if (!confirm('Firebase에 저장된 모든 데이터를 초기화할까요?\n(기존 데이터가 전부 삭제됩니다)')) return;
+  if (!dbRef) return;
+  const defaults = {
+    members: getDefaultMembers(),
+    checks: {},
+    notices: getDefaultNotices(),
+    nextMId: 100, nextHId: 100, nextNId: 10
+  };
+  dbRef.set(defaults, err => {
+    if (err) { showToast('초기화 실패: ' + err.message); return; }
+    localStorage.removeItem('gg_user_id');
+    location.reload();
+  });
+}
+
 function switchUser() {
   localStorage.removeItem('gg_user_id');
   currentUserId=null;
@@ -598,7 +631,31 @@ function save(cb) {
   if (!dbRef) return;
   const syncDot = document.getElementById('sync-dot');
   if (syncDot) syncDot.className='sync-dot saving';
-  dbRef.set({members,checks,notices,nextMId,nextHId,nextNId}, err=>{
+  // 저장 전 배열을 깔끔하게 직렬화 (Firebase null slot 방지)
+  // Firebase는 undefined/null 값을 저장 못 함 → 전부 정제
+  const cleanChecks = {};
+  Object.keys(checks).forEach(k => { if (checks[k] === true) cleanChecks[k] = true; });
+
+  const cleanMembers = members.map(m => ({
+    id: m.id, name: m.name || '', color: m.color || 0,
+    habits: (m.habits || []).map(h => ({
+      id: h.id, emoji: h.emoji || '📚', name: h.name || ''
+    }))
+  }));
+
+  const cleanNotices = notices.map(n => ({
+    id: n.id, text: n.text || '', ts: n.ts || Date.now()
+  }));
+
+  const payload = {
+    members: cleanMembers,
+    checks: cleanChecks,
+    notices: cleanNotices,
+    nextMId: nextMId || 100,
+    nextHId: nextHId || 100,
+    nextNId: nextNId || 10
+  };
+  dbRef.set(payload, err=>{
     if (syncDot) syncDot.className='sync-dot live';
     if (err) { console.error(err); showToast('저장 실패 — 네트워크 확인'); }
     if (cb) cb();
@@ -757,6 +814,7 @@ function renderSettings(){
   html+=`<div class="section-row"><div class="section-label">내 계정</div></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn" onclick="switchUser()">👤 사용자 변경</button>
+    ${isAdmin ? `<button class="btn" style="color:rgba(220,80,80,.8)" onclick="resetFirebaseData()">🗑 데이터 초기화</button>` : ''}
   </div>`;
 
   el.innerHTML=html;
